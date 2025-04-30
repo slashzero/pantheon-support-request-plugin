@@ -2,8 +2,9 @@
 
 A WordPress plugin that creates a support request form specifically designed for Pantheon-hosted websites. The plugin collects environment information (Dev/Test/Live) along with WordPress and server details to help your support team quickly diagnose issues.
 
-** Development server: ** https://dev-pantheon-support-request-plugin.pantheonsite.io/wp-admin/
-** Username: ** `pantheon-support-request-plugin`
+**Development server:** https://dev-pantheon-support-request-plugin.pantheonsite.io/wp-admin/
+
+**Username:** `pantheon-support-request-plugin`
 
 ## Features
 
