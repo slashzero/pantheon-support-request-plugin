@@ -1,0 +1,543 @@
+<?php
+/**
+ * Plugin Name: Pantheon Support Request
+ * Description: A Pantheon-specific support request form that sends submissions with environment and server data.
+ * Version: 1.0
+ * Author: Your Name
+ * Author URI: https://yourwebsite.com
+ */
+
+// If this file is called directly, abort.
+if (!defined('WPINC')) {
+    die;
+}
+
+// Plugin activation hook
+register_activation_hook(__FILE__, 'support_request_form_activate');
+
+function support_request_form_activate() {
+    // Initialize default settings
+    add_option('support_request_form_recipient', get_option('admin_email'));
+    add_option('support_request_form_subject', 'New Support Request');
+    add_option('support_request_form_smtp_enabled', 'no');
+    add_option('support_request_form_smtp_host', '');
+    add_option('support_request_form_smtp_port', '587');
+    add_option('support_request_form_smtp_username', '');
+    add_option('support_request_form_smtp_password', '');
+    add_option('support_request_form_smtp_secure', 'tls');
+    add_option('support_request_form_include_wp_info', 'yes');
+    add_option('support_request_form_include_server_info', 'yes');
+}
+
+// Plugin deactivation hook
+register_deactivation_hook(__FILE__, 'support_request_form_deactivate');
+
+function support_request_form_deactivate() {
+    // Deactivation code if needed
+}
+
+// Register plugin settings
+function support_request_form_register_settings() {
+    register_setting('support_request_form_settings_general', 'support_request_form_recipient', 'sanitize_email');
+    register_setting('support_request_form_settings_general', 'support_request_form_subject', 'sanitize_text_field');
+    register_setting('support_request_form_settings_general', 'support_request_form_include_wp_info');
+    register_setting('support_request_form_settings_general', 'support_request_form_include_server_info');
+    
+    register_setting('support_request_form_settings_smtp', 'support_request_form_smtp_enabled');
+    register_setting('support_request_form_settings_smtp', 'support_request_form_smtp_host', 'sanitize_text_field');
+    register_setting('support_request_form_settings_smtp', 'support_request_form_smtp_port', 'intval');
+    register_setting('support_request_form_settings_smtp', 'support_request_form_smtp_username', 'sanitize_text_field');
+    register_setting('support_request_form_settings_smtp', 'support_request_form_smtp_password', 'support_request_form_encrypt_password');
+    register_setting('support_request_form_settings_smtp', 'support_request_form_smtp_secure', 'sanitize_text_field');
+}
+add_action('admin_init', 'support_request_form_register_settings');
+
+// Password encryption handling
+function support_request_form_encrypt_password($password) {
+    if (empty($password)) {
+        // If empty password is submitted, keep the old one
+        return get_option('support_request_form_smtp_password');
+    }
+    return $password;
+}
+
+// Add settings page to admin menu
+function support_request_form_settings_page() {
+    add_options_page(
+        'Pantheon Support Request Settings',
+        'Pantheon Support',
+        'manage_options',
+        'pantheon-support-request',
+        'support_request_form_settings_page_content'
+    );
+    
+    // Add admin notice to help users find the settings page
+    if (isset($_GET['activate']) && $_GET['activate'] == 'true') {
+        add_action('admin_notices', 'support_request_form_admin_notice');
+    }
+}
+add_action('admin_menu', 'support_request_form_settings_page');
+
+// Admin notice to guide users to settings page
+function support_request_form_admin_notice() {
+    ?>
+    <div class="notice notice-info is-dismissible">
+        <p><strong>Pantheon Support Request:</strong> Please <a href="<?php echo admin_url('options-general.php?page=pantheon-support-request'); ?>">configure the settings</a> for your Pantheon support form.</p>
+    </div>
+    <?php
+}
+
+// Settings page content
+function support_request_form_settings_page_content() {
+    $active_tab = isset($_GET['tab']) ? $_GET['tab'] : 'general';
+    ?>
+    <div class="wrap">
+        <h1>Pantheon Support Request Settings</h1>
+        
+        <h2 class="nav-tab-wrapper">
+            <a href="?page=pantheon-support-request&tab=general" class="nav-tab <?php echo $active_tab == 'general' ? 'nav-tab-active' : ''; ?>">General</a>
+            <a href="?page=pantheon-support-request&tab=smtp" class="nav-tab <?php echo $active_tab == 'smtp' ? 'nav-tab-active' : ''; ?>">SMTP</a>
+            <a href="?page=pantheon-support-request&tab=help" class="nav-tab <?php echo $active_tab == 'help' ? 'nav-tab-active' : ''; ?>">Help</a>
+        </h2>
+        
+        <?php if ($active_tab == 'general') { ?>
+            <form method="post" action="options.php">
+                <?php settings_fields('support_request_form_settings_general'); ?>
+                
+                <table class="form-table">
+                    <tr valign="top">
+                        <th scope="row">Recipient Email</th>
+                        <td>
+                            <input type="email" name="support_request_form_recipient" 
+                                   value="<?php echo esc_attr(get_option('support_request_form_recipient')); ?>" />
+                            <p class="description">Support requests will be sent to this email address.</p>
+                        </td>
+                    </tr>
+                    <tr valign="top">
+                        <th scope="row">Email Subject</th>
+                        <td>
+                            <input type="text" name="support_request_form_subject" 
+                                   value="<?php echo esc_attr(get_option('support_request_form_subject')); ?>" />
+                            <p class="description">The subject line for support request emails.</p>
+                        </td>
+                    </tr>
+                    <tr valign="top">
+                        <th scope="row">Include WordPress Info</th>
+                        <td>
+                            <label>
+                                <input type="checkbox" name="support_request_form_include_wp_info" value="yes" <?php checked('yes', get_option('support_request_form_include_wp_info')); ?> />
+                                Include WordPress version, theme, and active plugins information
+                            </label>
+                        </td>
+                    </tr>
+                    <tr valign="top">
+                        <th scope="row">Include Server Info</th>
+                        <td>
+                            <label>
+                                <input type="checkbox" name="support_request_form_include_server_info" value="yes" <?php checked('yes', get_option('support_request_form_include_server_info')); ?> />
+                                Include server information (PHP version, server software, etc.)
+                            </label>
+                        </td>
+                    </tr>
+                </table>
+                
+                <div class="card" style="max-width: 600px; margin-top: 20px; padding: 10px 20px; background: #f8f9fa;">
+                    <h3>How to use the form</h3>
+                    <p>Add this shortcode to any page or post where you want the Pantheon support request form to appear:</p>
+                    <code style="background: #e9ecef; padding: 5px 10px; display: inline-block;">[pantheon_support_form]</code>
+                </div>
+                
+                <?php submit_button('Save General Settings'); ?>
+            </form>
+        <?php } elseif ($active_tab == 'smtp') { ?>
+            <form method="post" action="options.php">
+                <?php settings_fields('support_request_form_settings_smtp'); ?>
+                
+                <table class="form-table">
+                    <tr valign="top">
+                        <th scope="row">Enable SMTP</th>
+                        <td>
+                            <label>
+                                <input type="checkbox" name="support_request_form_smtp_enabled" value="yes" <?php checked('yes', get_option('support_request_form_smtp_enabled')); ?> />
+                                Use custom SMTP server for sending emails
+                            </label>
+                            <p class="description">If disabled, the default WordPress mail function will be used.</p>
+                        </td>
+                    </tr>
+                    <tr valign="top">
+                        <th scope="row">SMTP Host</th>
+                        <td>
+                            <input type="text" name="support_request_form_smtp_host" 
+                                   value="<?php echo esc_attr(get_option('support_request_form_smtp_host')); ?>" />
+                            <p class="description">The SMTP server hostname (e.g., smtp.gmail.com).</p>
+                        </td>
+                    </tr>
+                    <tr valign="top">
+                        <th scope="row">SMTP Port</th>
+                        <td>
+                            <input type="number" name="support_request_form_smtp_port" 
+                                   value="<?php echo esc_attr(get_option('support_request_form_smtp_port')); ?>" />
+                            <p class="description">The SMTP server port (usually 587 for TLS, 465 for SSL).</p>
+                        </td>
+                    </tr>
+                    <tr valign="top">
+                        <th scope="row">Encryption</th>
+                        <td>
+                            <select name="support_request_form_smtp_secure">
+                                <option value="tls" <?php selected('tls', get_option('support_request_form_smtp_secure')); ?>>TLS</option>
+                                <option value="ssl" <?php selected('ssl', get_option('support_request_form_smtp_secure')); ?>>SSL</option>
+                                <option value="" <?php selected('', get_option('support_request_form_smtp_secure')); ?>>None</option>
+                            </select>
+                        </td>
+                    </tr>
+                    <tr valign="top">
+                        <th scope="row">SMTP Username</th>
+                        <td>
+                            <input type="text" name="support_request_form_smtp_username" 
+                                   value="<?php echo esc_attr(get_option('support_request_form_smtp_username')); ?>" />
+                        </td>
+                    </tr>
+                    <tr valign="top">
+                        <th scope="row">SMTP Password</th>
+                        <td>
+                            <input type="password" name="support_request_form_smtp_password" 
+                                   value="<?php echo esc_attr(get_option('support_request_form_smtp_password')); ?>" />
+                            <p class="description">Leave empty to keep existing password.</p>
+                        </td>
+                    </tr>
+                </table>
+                
+                <div class="card" style="max-width: 600px; margin-top: 20px; padding: 10px 20px; background: #f8f9fa;">
+                    <h3>Testing SMTP Connection</h3>
+                    <p>After saving your SMTP settings, you can test the connection by sending a test email.</p>
+                    <a href="<?php echo admin_url('options-general.php?page=pantheon-support-request&tab=smtp&test_email=1'); ?>" class="button">Send Test Email</a>
+                    
+                    <?php
+                    // Handle test email
+                    if (isset($_GET['test_email']) && $_GET['test_email'] == 1) {
+                        $test_result = support_request_form_send_test_email();
+                        if ($test_result === true) {
+                            echo '<div class="notice notice-success inline"><p>Test email sent successfully!</p></div>';
+                        } else {
+                            echo '<div class="notice notice-error inline"><p>Failed to send test email: ' . esc_html($test_result) . '</p></div>';
+                        }
+                    }
+                    ?>
+                </div>
+                
+                <?php submit_button('Save SMTP Settings'); ?>
+            </form>
+        <?php } else { ?>
+            <div class="card" style="max-width: 800px; margin-top: 20px; padding: 20px; background: #f8f9fa;">
+                <h3>Using the Pantheon Support Request Form</h3>
+                
+                <h4>General Usage</h4>
+                <p>Add the form to any post or page using the shortcode: <code>[pantheon_support_form]</code></p>
+                
+                <h4>WordPress & Server Information</h4>
+                <p>When enabled, the following information will be included in support emails:</p>
+                <ul style="list-style-type: disc; margin-left: 20px;">
+                    <li>WordPress version</li>
+                    <li>Active theme</li>
+                    <li>Active plugins</li>
+                    <li>PHP version</li>
+                    <li>Server software</li>
+                    <li>MySQL version</li>
+                </ul>
+                
+                <h4>SMTP Setup</h4>
+                <p>For Gmail SMTP, use these settings:</p>
+                <ul style="list-style-type: disc; margin-left: 20px;">
+                    <li>SMTP Host: smtp.gmail.com</li>
+                    <li>SMTP Port: 587</li>
+                    <li>Encryption: TLS</li>
+                    <li>Username: your-email@gmail.com</li>
+                    <li>Password: your app password (requires 2FA and app password setup)</li>
+                </ul>
+                
+                <p>For other email providers, please consult their SMTP documentation.</p>
+            </div>
+        <?php } ?>
+    </div>
+    <?php
+}
+
+// Send test email function
+function support_request_form_send_test_email() {
+    $to = get_option('support_request_form_recipient');
+    $subject = 'SMTP Test Email';
+    $message = 'This is a test email from the Pantheon Support Request plugin. If you are reading this, your SMTP settings are configured correctly.';
+    
+    try {
+        $sent = support_request_form_send_mail($to, $subject, $message);
+        if ($sent) {
+            return true;
+        } else {
+            return 'Unknown error';
+        }
+    } catch (Exception $e) {
+        return $e->getMessage();
+    }
+}
+
+// Function to handle SMTP mail sending
+function support_request_form_send_mail($to, $subject, $body, $headers = '') {
+    if (get_option('support_request_form_smtp_enabled') != 'yes') {
+        // Use WordPress default mail function
+        return wp_mail($to, $subject, $body, $headers);
+    }
+    
+    // Use PHPMailer with SMTP
+    global $phpmailer;
+    
+    // Make sure the PHPMailer class is loaded
+    if (!is_object($phpmailer) || !is_a($phpmailer, 'PHPMailer')) {
+        require_once ABSPATH . WPINC . '/class-phpmailer.php';
+        require_once ABSPATH . WPINC . '/class-smtp.php';
+        $phpmailer = new PHPMailer(true);
+    }
+    
+    // Clear all recipients and attachments
+    $phpmailer->clearAllRecipients();
+    $phpmailer->clearAttachments();
+    
+    $phpmailer->isSMTP();
+    $phpmailer->Host = get_option('support_request_form_smtp_host');
+    $phpmailer->Port = get_option('support_request_form_smtp_port');
+    
+    // Set encryption
+    $secure = get_option('support_request_form_smtp_secure');
+    if (!empty($secure)) {
+        $phpmailer->SMTPSecure = $secure;
+    }
+    
+    // Set authentication
+    $username = get_option('support_request_form_smtp_username');
+    $password = get_option('support_request_form_smtp_password');
+    
+    if (!empty($username) && !empty($password)) {
+        $phpmailer->SMTPAuth = true;
+        $phpmailer->Username = $username;
+        $phpmailer->Password = $password;
+    } else {
+        $phpmailer->SMTPAuth = false;
+    }
+    
+    $phpmailer->From = $username;
+    $phpmailer->FromName = get_bloginfo('name');
+    $phpmailer->Subject = $subject;
+    $phpmailer->Body = $body;
+    
+    if (!empty($headers)) {
+        // Parse and add headers
+        $headerArray = explode("\n", str_replace("\r", "", $headers));
+        foreach ($headerArray as $header) {
+            if (strpos($header, ':') !== false) {
+                list($name, $value) = explode(':', $header, 2);
+                $phpmailer->addCustomHeader(trim($name), trim($value));
+            }
+        }
+    }
+    
+    $phpmailer->addAddress($to);
+    
+    try {
+        return $phpmailer->send();
+    } catch (Exception $e) {
+        throw new Exception($e->getMessage());
+    }
+}
+
+// Register shortcode
+function support_request_form_shortcode() {
+    ob_start();
+    
+    // Check if form is submitted and handle submission
+    if (isset($_POST['support_request_form_submit'])) {
+        $name = sanitize_text_field($_POST['name']);
+        $email = sanitize_email($_POST['email']);
+        $environment = sanitize_text_field($_POST['environment']);
+        $message = sanitize_textarea_field($_POST['message']);
+        
+        // Basic validation
+        if (empty($name) || empty($email) || empty($environment) || empty($message)) {
+            echo '<div class="support-request-form-error">Please fill in all fields.</div>';
+        } elseif (!is_email($email)) {
+            echo '<div class="support-request-form-error">Please enter a valid email address.</div>';
+        } else {
+            // Prepare email
+            $to = get_option('support_request_form_recipient');
+            $subject = get_option('support_request_form_subject');
+            
+            // Basic information
+            $body = "Support Request Details\n";
+            $body .= "====================\n\n";
+            $body .= "Name: $name\n";
+            $body .= "Email: $email\n";
+            $body .= "Pantheon Environment: $environment\n\n";
+            $body .= "Message:\n$message\n\n";
+            
+            // Add WordPress information if enabled
+            if (get_option('support_request_form_include_wp_info') == 'yes') {
+                $body .= "WordPress Information\n";
+                $body .= "====================\n\n";
+                $body .= "WordPress Version: " . get_bloginfo('version') . "\n";
+                $body .= "Site URL: " . site_url() . "\n";
+                $body .= "Home URL: " . home_url() . "\n";
+                
+                // Theme info
+                $theme = wp_get_theme();
+                $body .= "Active Theme: " . $theme->get('Name') . " " . $theme->get('Version') . "\n";
+                
+                // Get active plugins
+                $active_plugins = get_option('active_plugins');
+                $body .= "\nActive Plugins:\n";
+                
+                foreach ($active_plugins as $plugin) {
+                    $plugin_data = get_plugin_data(WP_PLUGIN_DIR . '/' . $plugin);
+                    $body .= "- " . $plugin_data['Name'] . " " . $plugin_data['Version'] . "\n";
+                }
+                $body .= "\n";
+            }
+            
+            // Add server information if enabled
+            if (get_option('support_request_form_include_server_info') == 'yes') {
+                $body .= "Server Information\n";
+                $body .= "====================\n\n";
+                $body .= "PHP Version: " . phpversion() . "\n";
+                $body .= "Server Software: " . $_SERVER['SERVER_SOFTWARE'] . "\n";
+                
+                // Get MySQL version if available
+                global $wpdb;
+                $mysql_version = $wpdb->get_var("SELECT VERSION()");
+                if ($mysql_version) {
+                    $body .= "MySQL Version: " . $mysql_version . "\n";
+                }
+                
+                // Add some useful server variables
+                $body .= "\nAdditional Server Information:\n";
+                $server_vars = array(
+                    'HTTP_HOST',
+                    'REMOTE_ADDR',
+                    'HTTP_USER_AGENT',
+                    'SERVER_PROTOCOL',
+                    'REQUEST_TIME'
+                );
+                
+                foreach ($server_vars as $var) {
+                    if (isset($_SERVER[$var])) {
+                        $body .= "- " . $var . ": " . $_SERVER[$var] . "\n";
+                    }
+                }
+                $body .= "\n";
+            }
+            
+            $headers = "From: $name <$email>" . "\r\n";
+            
+            // Send email using our custom function that supports SMTP
+            try {
+                $sent = support_request_form_send_mail($to, $subject, $body, $headers);
+                
+                if ($sent) {
+                    echo '<div class="support-request-form-success">Thank you for your support request. We\'ll get back to you soon!</div>';
+                } else {
+                    echo '<div class="support-request-form-error">There was a problem sending your request. Please try again later.</div>';
+                }
+            } catch (Exception $e) {
+                echo '<div class="support-request-form-error">Email error: ' . esc_html($e->getMessage()) . '</div>';
+            }
+        }
+    }
+    
+    // Display the form
+    ?>
+    <div class="support-request-form-container">
+        <form method="post" class="support-request-form">
+            <div class="form-field">
+                <label for="name">Name:</label>
+                <input type="text" name="name" id="name" required />
+            </div>
+            
+            <div class="form-field">
+                <label for="email">Email:</label>
+                <input type="email" name="email" id="email" required />
+            </div>
+            
+            <div class="form-field">
+                <label for="environment">Pantheon Environment:</label>
+                <select name="environment" id="environment" required>
+                    <option value="">-- Select Environment --</option>
+                    <option value="Dev">Dev</option>
+                    <option value="Test">Test</option>
+                    <option value="Live">Live</option>
+                </select>
+            </div>
+            
+            <div class="form-field">
+                <label for="message">Message:</label>
+                <textarea name="message" id="message" rows="5" required></textarea>
+            </div>
+            
+            <div class="form-field">
+                <input type="submit" name="support_request_form_submit" value="Submit Support Request" />
+            </div>
+        </form>
+    </div>
+    <?php
+    
+    // Add some basic CSS
+    ?>
+    <style>
+        .support-request-form-container {
+            max-width: 600px;
+            margin: 0 auto;
+        }
+        
+        .support-request-form .form-field {
+            margin-bottom: 15px;
+        }
+        
+        .support-request-form label {
+            display: block;
+            margin-bottom: 5px;
+        }
+        
+        .support-request-form input[type="text"],
+        .support-request-form input[type="email"],
+        .support-request-form select,
+        .support-request-form textarea {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+        }
+        
+        .support-request-form input[type="submit"] {
+            background-color: #0073aa;
+            color: #fff;
+            border: none;
+            padding: 10px 15px;
+            cursor: pointer;
+        }
+        
+        .support-request-form-success {
+            background-color: #d4edda;
+            color: #155724;
+            padding: 10px;
+            margin-bottom: 15px;
+            border-radius: 4px;
+        }
+        
+        .support-request-form-error {
+            background-color: #f8d7da;
+            color: #721c24;
+            padding: 10px;
+            margin-bottom: 15px;
+            border-radius: 4px;
+        }
+    </style>
+    <?php
+    
+    return ob_get_clean();
+}
+add_shortcode('pantheon_support_form', 'support_request_form_shortcode');
+?>
